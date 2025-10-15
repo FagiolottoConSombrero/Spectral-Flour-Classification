@@ -118,7 +118,7 @@ def main(data_root, save_dir="", batch_size=8, num_workers=4, lr=1e-3, epochs=10
         max_epochs=epochs,
         devices=devices,
         accelerator="auto",
-        precision="16-mixed" if torch.cuda.is_available() else "32-true",
+        precision="32-true",
         callbacks=[ckpt],
         log_every_n_steps=10,
     )
