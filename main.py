@@ -1,4 +1,3 @@
-# train_span_lightning.py  (solo train+val)
 import math, random
 from pathlib import Path
 import torch
@@ -68,7 +67,7 @@ class LitSPANBinary(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.model = SPAN(num_in_ch=in_channels, feature_channels=48, bias=True)
-        self.criterion = nn.BCELoss()
+        self.criterion = nn.BCEWithLogitsLoss()
 
     def forward(self, x):
         return self.model(x)  # (B,1) probabilità
