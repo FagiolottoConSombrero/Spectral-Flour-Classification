@@ -4,6 +4,7 @@ import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader, random_split
 import pytorch_lightning as pl
+from torch.optim.lr_scheduler import StepLR
 
 # ====== riusa le tue classi già definite ======
 # from your_module import FlourFolderDataset, SPAN
@@ -80,7 +81,17 @@ class LitSPANBinary(pl.LightningModule):
         self._step_common(batch, "test")
 
     def configure_optimizers(self):
-        return optim.Adam(self.parameters(), lr=self.hparams.lr)
+        optimizer = optim.Adam(self.parameters(), lr=self.hparams.lr)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=30)
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "monitor": "val_loss",
+                "interval": "epoch",
+                "frequency": 1
+            }
+        }
 
 
 def infer_in_channels(loader):
@@ -89,16 +100,7 @@ def infer_in_channels(loader):
     raise RuntimeError("Dataloader vuoto: impossibile inferire i canali.")
 
 
-def main(
-    data_root,
-    save_dir="runs/span_lightning",
-    batch_size=8,
-    num_workers=4,
-    lr=1e-3,
-    epochs=10,
-    seed=42,
-    devices="auto",
-):
+def main(data_root, save_dir="", batch_size=8, num_workers=4, lr=1e-3, epochs=10, seed=42, devices="auto"):
     set_seed(seed)
     train_loader, val_loader, test_loader = make_loaders(
         data_root, batch_size=batch_size, num_workers=num_workers, val_ratio=0.2, test_ratio=0.0
