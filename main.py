@@ -5,7 +5,7 @@ import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader, random_split
 import pytorch_lightning as pl
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, LearningRateMonitor
+from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint, LearningRateMonitor
 
 # === i tuoi moduli ===
 from data_loader import FlourFolderDataset
