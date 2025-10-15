@@ -221,14 +221,6 @@ class SPAN(nn.Module):
         out = self.conv_cat(torch.cat([out_feature, out_b6, out_b1, out_b5_2], 1))
         pooled = self.gap(out).view(out.size(0), -1)   # (B, C)
         logits = self.fc(pooled)                       # (B, 1)
-        output = torch.sigmoid(logits)
 
-        return output
+        return logits
 
-if __name__ == "__main__":
-    from fvcore.nn import FlopCountAnalysis, flop_count_table
-    import time
-    model = SPAN(121, feature_channels=48)
-    model.eval()
-    inputs = (torch.rand(1, 121, 56, 56),)
-    print(flop_count_table(FlopCountAnalysis(model, inputs)))
