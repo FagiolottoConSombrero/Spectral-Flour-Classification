@@ -63,10 +63,10 @@ class LitSPANBinary(pl.LightningModule):
     Classificazione binaria: SPAN emette probabilità (sigmoid) shape (B,1).
     Loss: BCELoss. Metric: accuracy (soglia 0.5).
     """
-    def __init__(self, in_channels: int, lr: float = 1e-3):
+    def __init__(self, in_channels: int, se: bool):
         super().__init__()
         self.save_hyperparameters()
-        self.model = SPAN(num_in_ch=in_channels, feature_channels=48, bias=True)
+        self.model = SPAN(num_in_ch=in_channels, feature_channels=48, bias=True, se=se)
         self.criterion = nn.BCEWithLogitsLoss()
 
     def forward(self, x):
@@ -115,6 +115,7 @@ def main(
     lr: float = 1e-3,
     epochs: int = 50,
     seed: int = 42,
+    se: bool = True,
     devices="auto",
 ):
     set_seed(seed)
@@ -125,7 +126,7 @@ def main(
 
     # inferisci C dai dati
     in_ch = infer_in_channels(DataLoader(train_loader.dataset, batch_size=1, shuffle=False))
-    model = LitSPANBinary(in_channels=in_ch, lr=lr)
+    model = LitSPANBinary(in_channels=in_ch, se=se)
 
     # checkpoint + early stopping (stop se val_loss non migliora per 100 epoche)
     ckpt = ModelCheckpoint(dirpath=save_dir, filename="best", monitor="val_loss", mode="min", save_top_k=1)
@@ -154,6 +155,7 @@ if __name__ == "__main__":
     ap.add_argument("--num_workers", type=int, default=4)
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--epochs", type=int, default=50)
+    ap.add_argument("--se", type=bool, default=True)
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
@@ -164,6 +166,7 @@ if __name__ == "__main__":
         num_workers=args.num_workers,
         lr=args.lr,
         epochs=args.epochs,
+        se=args.se,
         seed=args.seed,
     )
 
