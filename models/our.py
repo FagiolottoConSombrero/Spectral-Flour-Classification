@@ -79,6 +79,22 @@ def sequential(*args):
     return nn.Sequential(*modules)
 
 
+class SEBlock(nn.Module):
+    def __init__(self, channels, reduction=8):
+        super().__init__()
+        self.se = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(channels, channels // reduction, kernel_size=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channels // reduction, channels, kernel_size=1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        w = self.se(x)
+        return x * w
+
+
 class Conv3XC(nn.Module):
     def __init__(self, c_in, c_out, gain1=1, gain2=0, s=1, bias=True, relu=False):
         super(Conv3XC, self).__init__()
@@ -185,11 +201,12 @@ class SPAN(nn.Module):
     def __init__(self,
                  num_in_ch,
                  feature_channels=48,
-                 bias=True
-                 ):
+                 bias=True,
+                 se=True):
         super(SPAN, self).__init__()
 
         in_channels = num_in_ch
+        self.SE = se
 
         self.conv_1 = Conv3XC(in_channels, feature_channels, gain1=2, s=1)
         self.block_1 = SPAB(feature_channels, bias=bias)
@@ -201,6 +218,7 @@ class SPAN(nn.Module):
 
         self.conv_cat = conv_layer(feature_channels * 4, feature_channels, kernel_size=1, bias=True)
         self.conv_2 = Conv3XC(feature_channels, feature_channels, gain1=2, s=1)
+        self.se = SEBlock(feature_channels)
 
         self.gap = nn.AdaptiveAvgPool2d(1)  # Global Average Pooling -> (B, C, 1, 1)
         self.fc = nn.Linear(feature_channels, 1)
@@ -219,6 +237,7 @@ class SPAN(nn.Module):
 
         out_b6 = self.conv_2(out_b6)
         out = self.conv_cat(torch.cat([out_feature, out_b6, out_b1, out_b5_2], 1))
+        if self.SE: out = self.se(out)
         pooled = self.gap(out).view(out.size(0), -1)   # (B, C)
         logits = self.fc(pooled)                       # (B, 1)
 
