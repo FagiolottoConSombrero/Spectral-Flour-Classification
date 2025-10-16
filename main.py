@@ -63,7 +63,7 @@ class LitSPANBinary(pl.LightningModule):
     Classificazione binaria: SPAN emette probabilità (sigmoid) shape (B,1).
     Loss: BCELoss. Metric: accuracy (soglia 0.5).
     """
-    def __init__(self, in_channels: int, se: bool):
+    def __init__(self, in_channels: int, se: bool, lr: float = 1e-3):
         super().__init__()
         self.save_hyperparameters()
         self.model = SPAN(num_in_ch=in_channels, feature_channels=48, bias=True, se=se)
@@ -126,7 +126,7 @@ def main(
 
     # inferisci C dai dati
     in_ch = infer_in_channels(DataLoader(train_loader.dataset, batch_size=1, shuffle=False))
-    model = LitSPANBinary(in_channels=in_ch, se=se)
+    model = LitSPANBinary(in_channels=in_ch, se=se, lr=lr)
 
     # checkpoint + early stopping (stop se val_loss non migliora per 100 epoche)
     ckpt = ModelCheckpoint(dirpath=save_dir, filename="best", monitor="val_loss", mode="min", save_top_k=1)
