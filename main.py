@@ -13,46 +13,42 @@ from models.our import SPAN
 
 # ---------------- util ----------------
 def set_seed(seed=42):
-    random.seed(seed); torch.manual_seed(seed); torch.cuda.manual_seed_all(seed)
+    random.seed(seed);
+    torch.manual_seed(seed);
+    torch.cuda.manual_seed_all(seed)
+
 
 def infer_in_channels(loader: DataLoader) -> int:
     for xb, _ in loader:
         return int(xb.shape[1])
     raise RuntimeError("Dataloader vuoto: impossibile inferire i canali.")
 
-def make_loaders(root, batch_size=8, num_workers=4, val_ratio=0.2, pin_memory=True):
+
+def make_loaders(root, sensor_root, rgb, ir, batch_size=8, num_workers=4, val_ratio=0.2, pin_memory=True):
     """
     Se esistono /train e /val sotto root li usa; altrimenti fa split random.
     """
     root = Path(root)
-
-    if (root / "train").is_dir() and (root / "val").is_dir():
-        train_set = FlourFolderDataset(root / "train")
-        val_set   = FlourFolderDataset(root / "val")
-    else:
-        full = FlourFolderDataset(root)
-        n = len(full)
-        n_val  = int(math.floor(n * val_ratio))
-        n_train = n - n_val
-        train_set, val_set = random_split(full, [n_train, n_val], generator=torch.Generator().manual_seed(0))
+    full = FlourFolderDataset(root=root,
+                              spectral_sens_csv=sensor_root,
+                              rgb=rgb, ir=ir,
+                              hsi_channels_first=False,  # True se i tuoi HSI sono (L,H,W)
+                              illuminant_mode="planck",  # alogena
+                              illuminant_T=2856.0)
+    n = len(full)
+    n_val = int(math.floor(n * val_ratio))
+    n_train = n - n_val
+    train_set, val_set = random_split(full, [n_train, n_val], generator=torch.Generator().manual_seed(0))
 
     pw = num_workers > 0
 
-    def _collate(batch):
-        xs, ys = zip(*batch)
-        xs = torch.stack(xs, 0)             # (B,C,H,W)
-        ys = torch.as_tensor(ys, dtype=torch.long)
-        return xs, ys
-
     train_loader = DataLoader(
         train_set, batch_size=batch_size, shuffle=True,
-        num_workers=num_workers, pin_memory=pin_memory, persistent_workers=pw,
-        collate_fn=_collate
+        num_workers=num_workers, pin_memory=pin_memory, persistent_workers=pw
     )
     val_loader = DataLoader(
         val_set, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, pin_memory=pin_memory, persistent_workers=pw,
-        collate_fn=_collate
+        num_workers=num_workers, pin_memory=pin_memory, persistent_workers=pw
     )
     return train_loader, val_loader
 
@@ -63,6 +59,7 @@ class LitSPANBinary(pl.LightningModule):
     Classificazione binaria: SPAN emette probabilità (sigmoid) shape (B,1).
     Loss: BCELoss. Metric: accuracy (soglia 0.5).
     """
+
     def __init__(self, in_channels: int, se: bool, lr: float = 1e-3):
         super().__init__()
         self.save_hyperparameters()
@@ -81,7 +78,7 @@ class LitSPANBinary(pl.LightningModule):
         pred = (probs.view(-1) >= 0.5).long()
         acc = (pred == y_int.view(-1)).float().mean()
         self.log(f"{stage}_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
-        self.log(f"{stage}_acc",  acc,  prog_bar=True, on_step=False, on_epoch=True)
+        self.log(f"{stage}_acc", acc, prog_bar=True, on_step=False, on_epoch=True)
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -108,20 +105,22 @@ class LitSPANBinary(pl.LightningModule):
 
 # ---------------- main ----------------
 def main(
-    data_root: str,
-    save_dir: str = "runs/span_lightning",
-    batch_size: int = 8,
-    num_workers: int = 4,
-    lr: float = 1e-3,
-    epochs: int = 50,
-    seed: int = 42,
-    se: bool = True,
-    devices="auto",
-):
+        data_root: str,
+        sensor_root: str,
+        rgb: bool,
+        ir: bool,
+        save_dir: str = "runs/span_lightning",
+        batch_size: int = 8,
+        num_workers: int = 4,
+        lr: float = 1e-3,
+        epochs: int = 50,
+        seed: int = 42,
+        se: bool = True,
+        devices="auto"):
     set_seed(seed)
 
     train_loader, val_loader = make_loaders(
-        data_root, batch_size=batch_size, num_workers=num_workers, val_ratio=0.2
+        data_root, sensor_root, rgb, ir, batch_size=batch_size, num_workers=num_workers, val_ratio=0.2
     )
 
     # inferisci C dai dati
@@ -148,8 +147,10 @@ def main(
 
 if __name__ == "__main__":
     import argparse
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_root", type=str, required=True)
+    ap.add_argument("--sensor_root", type=str, required=True)
     ap.add_argument("--save_dir", type=str, default="runs/span_lightning")
     ap.add_argument("--batch_size", type=int, default=8)
     ap.add_argument("--num_workers", type=int, default=4)
@@ -157,10 +158,15 @@ if __name__ == "__main__":
     ap.add_argument("--epochs", type=int, default=50)
     ap.add_argument("--se", type=bool, default=True)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--rgb", type=bool, default=False)
+    ap.add_argument("--ir", type=bool, default=False)
     args = ap.parse_args()
 
     main(
         data_root=args.data_root,
+        sensor_root=args.sensor_root,
+        rgb=args.rgb,
+        ir=args.ir,
         save_dir=args.save_dir,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
@@ -169,4 +175,3 @@ if __name__ == "__main__":
         se=args.se,
         seed=args.seed,
     )
-
