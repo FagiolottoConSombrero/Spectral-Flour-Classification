@@ -262,6 +262,3 @@ class FlourFolderDataset(Dataset):
 
         proj = (E[:, None] * S_interp) * dl[:, None]   # (L, C)
         return proj
-
-
-csv_path = "/Users/kolyszko/Downloads/Sony_ILCE_6100_RGBIR_scaled_005.csv"
