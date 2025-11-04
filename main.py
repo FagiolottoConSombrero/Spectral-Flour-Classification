@@ -154,7 +154,7 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_root", type=str, required=True)
-    ap.add_argument("--sensor_root", type=str, required=True)
+    ap.add_argument("--sensor_root", type=str)
     ap.add_argument("--save_dir", type=str, default="runs/span_lightning")
     ap.add_argument("--batch_size", type=int, default=8)
     ap.add_argument("--num_workers", type=int, default=4)
