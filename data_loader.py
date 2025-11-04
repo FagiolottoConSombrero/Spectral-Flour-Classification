@@ -7,11 +7,15 @@ from torch.utils.data import Dataset
 class FlourFolderDataset(Dataset):
     """
     Legge HSI in .h5 organizzati per classi: root/class_name/*.h5
-    Proietta il cubo HSI su RGB o RGB-IR usando:
-      - curve spettrali dal CSV (wavelength, red, green, blue[, IR850])
-      - illuminante (alogeno Planck 2856 K di default, oppure None o array custom)
 
-    Output: (x, y) con x di shape (C, H, W), C=3 (RGB) o 4 (RGB-IR)
+    Modalità:
+      1) Proiezione HSI → RGB o RGB-IR usando:
+         - curve spettrali dal CSV (wavelength, red, green, blue[, IR850])
+         - illuminante (alogeno Planck 2856 K di default, oppure None o array custom)
+         Output: (x, y) con x di shape (C, H, W), C=3 (RGB) o 4 (RGB-IR)
+
+      2) patch_mean=True → solo media spettrale della patch (nessuna proiezione)
+         Output: (x, y) con x di shape (1, L), tipicamente (1, 121)
     """
 
     # ---- Costanti utili ----
@@ -31,13 +35,18 @@ class FlourFolderDataset(Dataset):
         illuminant_T: float = 2856.0,         # K, usato se illuminant_mode="planck"
         illuminant_array: np.ndarray = None,  # shape (L,), usato se illuminant_mode="array"
         return_path: bool = False,
+        patch_mean: bool = False,             # <-- NUOVO: se True, restituisce (1, L) media patch
     ):
         super().__init__()
         self.root = root
         self.spectral_sens_csv = spectral_sens_csv
         self.rgb = rgb
         self.ir = ir
-        self.dataset_keys = dataset_keys
+        # accetta sia stringa singola che lista/tupla
+        if isinstance(dataset_keys, (str, bytes)):
+            self.dataset_keys = [dataset_keys]
+        else:
+            self.dataset_keys = list(dataset_keys)
         self.exclude_prefixes = exclude_prefixes
         self.dtype = dtype
         self.hsi_channels_first = hsi_channels_first
@@ -45,9 +54,10 @@ class FlourFolderDataset(Dataset):
         self.illuminant_T = illuminant_T
         self.illuminant_array = illuminant_array
         self.return_path = return_path
+        self.patch_mean = patch_mean
 
-        if not (self.rgb or self.ir):
-            raise ValueError("Imposta almeno uno tra rgb=True o ir=True.")
+        if not self.patch_mean and not (self.rgb or self.ir):
+            raise ValueError("Imposta almeno uno tra rgb=True o ir=True, oppure patch_mean=True.")
 
         # ---- indicizza classi e file ----
         self.classes = sorted([d for d in os.listdir(root)
@@ -69,15 +79,16 @@ class FlourFolderDataset(Dataset):
             raise RuntimeError(f"Nessun .h5 trovato sotto {root}")
         self.samples = samples
 
-        # ---- carica curve sensore dal CSV (una volta) ----
-        self._sens_wl, self._sens_mat, self._sens_labels = self._load_sens_csv(self.spectral_sens_csv)
-        # decide quali colonne usare
-        self._use_cols = self._decide_channels(self.rgb, self.ir, self._sens_labels)
-        self._out_channels = len(self._use_cols)
-
-        # cache della matrice di proiezione per un dato vettore di λ
-        self._cached_wl_key = None
-        self._proj_matrix = None  # shape (L, C)
+        # Se siamo in modalità patch_mean, non servono curve/illuminante
+        if not self.patch_mean:
+            # ---- carica curve sensore dal CSV (una volta) ----
+            self._sens_wl, self._sens_mat, self._sens_labels = self._load_sens_csv(self.spectral_sens_csv)
+            # decide quali colonne usare
+            self._use_cols = self._decide_channels(self.rgb, self.ir, self._sens_labels)
+            self._out_channels = len(self._use_cols)
+            # cache della matrice di proiezione per un dato vettore di λ
+            self._cached_wl_key = None
+            self._proj_matrix = None  # shape (L, C)
 
     # ---------- API Dataset ----------
     def __len__(self):
@@ -91,9 +102,16 @@ class FlourFolderDataset(Dataset):
         if wl is None or wl.size == 0:
             wl = self.DEFAULT_WAVELENGTHS
 
-        # (ri)costruisci la matrice di proiezione se necessario
-        wl_key = (wl[0], wl[-1], wl.size)
-        if (self._proj_matrix is None) or (wl_key != self._cached_wl_key):
+        # --- Modalità 2: media spettrale patch ---
+        if self.patch_mean:
+            # media su H e W → (L,)
+            spec = cube.reshape(-1, cube.shape[-1]).mean(axis=0).astype(np.float64)
+            x = torch.from_numpy(spec[None, :]).to(self.dtype)  # (1, L)
+            return (x, y, path) if self.return_path else (x, y)
+
+        # --- Modalità 1: proiezione RGB / RGB-IR ---
+        wl_key = (float(wl[0]), float(wl[-1]), int(wl.size))
+        if (getattr(self, "_proj_matrix", None) is None) or (wl_key != getattr(self, "_cached_wl_key", None)):
             self._proj_matrix = self._build_projection(wl)   # (L, C)
             self._cached_wl_key = wl_key
 
@@ -129,7 +147,7 @@ class FlourFolderDataset(Dataset):
 
         with h5py.File(path, "r") as f:
             arr = None
-            # 1) prova i dataset key in ordine (come facevi tu)
+            # 1) prova i dataset key in ordine
             for k in self.dataset_keys:
                 if k in f and isinstance(f[k], h5py.Dataset):
                     arr = f[k][()]
@@ -150,30 +168,26 @@ class FlourFolderDataset(Dataset):
                     wl = np.asarray(f[k][()], dtype=np.float64).reshape(-1)
                     break
 
-        # --- coerzione forma, restando fedele al tuo comportamento ---
+        # --- coerzione forma ---
         if arr.ndim != 3:
             raise ValueError(f"atteso 3D, trovato {arr.shape} in {path}")
 
-        # Se è (H,W,C) portalo a (C,H,W) come fai tu...
+        # Se è (H,W,C) portalo a (C,H,W) se serve capire
         if arr.shape[0] not in (121, 3, 4) and arr.shape[-1] in (121, 3, 4):
             arr = np.moveaxis(arr, -1, 0)  # (C,H,W)
 
-        # ...ma la nostra pipeline di proiezione lavora in (H,W,L).
-        # Quindi, se C=121 (spettrale), riportiamolo a (H,W,L).
+        # Porta a (H,W,L)
         if arr.shape[0] == 121:  # (C=121,H,W) → (H,W,L=121)
             cube = np.moveaxis(arr, 0, -1)
         elif arr.shape[0] in (3, 4):
-            # se il file fosse già RGB/RGB-IR, trattalo come (C,H,W) e converti a (H,W,C)
             cube = np.moveaxis(arr, 0, -1)
         else:
-            # caso raro: lascialo com'è, ma prova a portarlo a (H,W,L)
             cube = np.moveaxis(arr, 0, -1)
 
         # wl di default se mancano e se è davvero spettrale (121 canali)
         if wl is None and cube.shape[-1] == 121:
             wl = np.arange(400.0, 1000.0 + 1e-9, 5.0)
         elif wl is None:
-            # non spettrale (es. già RGB), wl non serve davvero
             wl = np.arange(cube.shape[-1], dtype=np.float64)
 
         return cube.astype(np.float64), wl
@@ -262,3 +276,4 @@ class FlourFolderDataset(Dataset):
 
         proj = (E[:, None] * S_interp) * dl[:, None]   # (L, C)
         return proj
+

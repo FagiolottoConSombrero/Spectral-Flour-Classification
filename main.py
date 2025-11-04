@@ -8,7 +8,7 @@ from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint, Learning
 
 # === i tuoi moduli ===
 from data_loader import FlourFolderDataset
-from models.our import SPAN
+from models.our import SPAN, MLPClassifier
 
 
 # ---------------- util ----------------
@@ -60,10 +60,13 @@ class LitSPANBinary(pl.LightningModule):
     Loss: BCELoss. Metric: accuracy (soglia 0.5).
     """
 
-    def __init__(self, in_channels: int, se: bool, lr: float = 1e-3):
+    def __init__(self, in_channels: int, se: bool, patch : bool = True, lr: float = 1e-3):
         super().__init__()
         self.save_hyperparameters()
-        self.model = SPAN(num_in_ch=in_channels, feature_channels=48, bias=True, se=se)
+        if patch:
+            self.model = SPAN(num_in_ch=in_channels, feature_channels=48, bias=True, se=se)
+        else:
+            self.model = MLPClassifier(input_dim=in_channels, num_classes=2)
         self.criterion = nn.BCEWithLogitsLoss()
 
     def forward(self, x):
@@ -116,6 +119,7 @@ def main(
         epochs: int = 50,
         seed: int = 42,
         se: bool = True,
+        patch: bool = True,
         devices="auto"):
     set_seed(seed)
 
@@ -125,7 +129,7 @@ def main(
 
     # inferisci C dai dati
     in_ch = infer_in_channels(DataLoader(train_loader.dataset, batch_size=1, shuffle=False))
-    model = LitSPANBinary(in_channels=in_ch, se=se, lr=lr)
+    model = LitSPANBinary(in_channels=in_ch, se=se, lr=lr, patch=patch)
 
     # checkpoint + early stopping (stop se val_loss non migliora per 100 epoche)
     ckpt = ModelCheckpoint(dirpath=save_dir, filename="best", monitor="val_loss", mode="min", save_top_k=1)
@@ -160,6 +164,7 @@ if __name__ == "__main__":
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--rgb", type=bool, default=False)
     ap.add_argument("--ir", type=bool, default=False)
+    ap.add_argument("--patch", type=bool, default=True)
     args = ap.parse_args()
 
     main(
@@ -174,4 +179,5 @@ if __name__ == "__main__":
         epochs=args.epochs,
         se=args.se,
         seed=args.seed,
+        patch=args.patch,
     )

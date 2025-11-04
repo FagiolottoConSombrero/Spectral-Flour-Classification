@@ -243,3 +243,47 @@ class SPAN(nn.Module):
 
         return logits
 
+
+class MLPClassifier(nn.Module):
+    """
+    MLP per classificazione di segnali 1D (es. spettri di lunghezza L).
+    Input:  (B, L)
+    Output: (B, num_classes)
+    """
+    def __init__(
+        self,
+        input_dim: int,
+        num_classes: int,
+        hidden_dims=(256, 256),
+        dropout: float = 0.1,
+        use_batchnorm: bool = True,
+        activation: str = "gelu"  # "relu" o "gelu"
+    ):
+        super().__init__()
+        act = nn.GELU if activation.lower() == "gelu" else nn.ReLU
+
+        layers = []
+        prev = input_dim
+        for h in hidden_dims:
+            layers.append(nn.Linear(prev, h))
+            if use_batchnorm:
+                layers.append(nn.BatchNorm1d(h))
+            layers.append(act())
+            if dropout > 0:
+                layers.append(nn.Dropout(dropout))
+            prev = h
+
+        self.backbone = nn.Sequential(*layers)
+        self.classifier = nn.Linear(prev, num_classes)
+
+        # Inizializzazione Xavier
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, L)
+        x = self.backbone(x)
+        return self.classifier(x)

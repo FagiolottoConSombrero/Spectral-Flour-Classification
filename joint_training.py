@@ -1,4 +1,5 @@
 import math, random
+import argparse
 from pathlib import Path
 import torch
 from torch import nn, optim
@@ -187,25 +188,24 @@ def main(
 
 
 if __name__ == "__main__":
-    import argparse
 
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--data_root", type=str, required=True)
-    ap.add_argument("--sensor_root", type=str, required=True)
-    ap.add_argument("--save_dir", type=str, default="runs/span_lightning")
-    ap.add_argument("--batch_size", type=int, default=8)
-    ap.add_argument("--num_workers", type=int, default=4)
-    ap.add_argument("--lr", type=float, default=1e-4)
-    ap.add_argument("--epochs", type=int, default=50)
-    ap.add_argument("--se", type=bool, default=True)
-    ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--rgb", type=bool, default=False)
-    ap.add_argument("--ir", type=bool, default=False)
+    arg = argparse.ArgumentParser()
+    arg.add_argument("--data_root", type=str, required=True)
+    arg.add_argument("--sensor_root", type=str, required=True)
+    arg.add_argument("--save_dir", type=str, default="runs/span_lightning")
+    arg.add_argument("--batch_size", type=int, default=8)
+    arg.add_argument("--num_workers", type=int, default=4)
+    arg.add_argument("--lr", type=float, default=1e-4)
+    arg.add_argument("--epochs", type=int, default=50)
+    arg.add_argument("--se", type=bool, default=True)
+    arg.add_argument("--seed", type=int, default=42)
+    arg.add_argument("--rgb", type=bool, default=False)
+    arg.add_argument("--ir", type=bool, default=False)
     # nuovi argomenti
-    ap.add_argument("--recon_ckpt", type=str, required=True, help="path ai pesi pre-addestrati di JointDualFilterMST (state_dict)")
-    ap.add_argument("--recon_k", type=int, default=3)
-    ap.add_argument("--recon_sum_to_one", action="store_true")
-    args = ap.parse_args()
+    arg.add_argument("--recon_ckpt", type=str, required=True, help="path ai pesi pre-addestrati di JointDualFilterMST (state_dict)")
+    arg.add_argument("--recon_k", type=int, default=3)
+    arg.add_argument("--recon_sum_to_one", action="store_true")
+    args = arg.parse_args()
 
     main(
         data_root=args.data_root,
