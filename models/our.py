@@ -283,7 +283,8 @@ class MLPClassifier(nn.Module):
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, L)
+    def forward(self, x):
+        if x.ndim == 3:
+            x = x.squeeze(1)
         x = self.backbone(x)
         return self.classifier(x)
