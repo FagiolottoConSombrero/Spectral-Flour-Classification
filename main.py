@@ -24,7 +24,7 @@ def infer_in_channels(loader: DataLoader) -> int:
     raise RuntimeError("Dataloader vuoto: impossibile inferire i canali.")
 
 
-def make_loaders(root, sensor_root, rgb, ir, batch_size=8, num_workers=4, val_ratio=0.2, pin_memory=True):
+def make_loaders(root, sensor_root, rgb, ir, patch_mean, batch_size=8, num_workers=4, val_ratio=0.2, pin_memory=True):
     """
     Se esistono /train e /val sotto root li usa; altrimenti fa split random.
     """
@@ -34,7 +34,8 @@ def make_loaders(root, sensor_root, rgb, ir, batch_size=8, num_workers=4, val_ra
                               rgb=rgb, ir=ir,
                               hsi_channels_first=False,  # True se i tuoi HSI sono (L,H,W)
                               illuminant_mode="planck",  # alogena
-                              illuminant_T=2856.0)
+                              illuminant_T=2856.0,
+                              patch_mean=patch_mean)
     n = len(full)
     n_val = int(math.floor(n * val_ratio))
     n_train = n - n_val
@@ -124,8 +125,7 @@ def main(
     set_seed(seed)
 
     train_loader, val_loader = make_loaders(
-        data_root, sensor_root, rgb, ir, batch_size=batch_size, num_workers=num_workers, val_ratio=0.2
-    )
+        data_root, sensor_root, rgb, ir, patch_mean=patch, batch_size=batch_size, num_workers=num_workers, val_ratio=0.2)
 
     # inferisci C dai dati
     in_ch = infer_in_channels(DataLoader(train_loader.dataset, batch_size=1, shuffle=False))
