@@ -65,7 +65,7 @@ class LitSPANBinary(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         if patch:
-            self.model = MLPClassifier(input_dim=in_channels, num_classes=2)
+            self.model = MLPClassifier(input_dim=121, num_classes=2)
         else:
             self.model = SPAN(num_in_ch=in_channels, feature_channels=48, bias=True, se=se)
         self.criterion = nn.BCEWithLogitsLoss()
