@@ -164,7 +164,7 @@ if __name__ == "__main__":
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--rgb", type=bool, default=False)
     ap.add_argument("--ir", type=bool, default=False)
-    ap.add_argument("--patch", type=bool, default=True)
+    ap.add_argument("--patch_mean", type=bool, default=True)
     args = ap.parse_args()
 
     main(
