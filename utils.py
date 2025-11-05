@@ -84,6 +84,7 @@ class LitReconThenSPAN(pl.LightningModule):
         # pipeline completa
         with torch.no_grad():
             hsi = self._reconstruct_hsi(x4)
+        print(hsi.shape)
         logits = self.model(hsi)  # (B,1)
         return logits
 
