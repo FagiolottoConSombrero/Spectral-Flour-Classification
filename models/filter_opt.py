@@ -1,3 +1,4 @@
+import numpy as np
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
@@ -301,90 +302,198 @@ class MST_Plus_Plus(nn.Module):
 
 
 def _softplus_inv(y, beta=1.0):
-    # inversa numerica di softplus, y>0
     return torch.log(torch.expm1(beta * y)) / beta
 
 
-class PreFilter4ch(nn.Module):
+class Filter(nn.Module):
     """
-    Filtro depthwise per-canale 4->4, kernel k×k.
-    - Non negatività sempre attiva (softplus).
-    - Smoothness: TV-L2 sulle derivate finite (dx, dy).
-    - Inizializzazione identità (delta) per stabilità.
-    Opzionale: normalizzazione sum-to-one per canale.
+    Input:
+      X : [B, C, H, W]
+    Output:
+      Y : [B, 4, H, W]
     """
-    def __init__(self, k=3, sum_to_one=False, eps=1e-6):
+    def __init__(self, spectral_sens_csv: str,
+                 sum_to_one: bool=False,
+                 eps: float=1e-6,
+                 dtype=torch.float32,
+                 device="cpu"):
         super().__init__()
-        assert k % 2 == 1, "Usa kernel dispari per avere il centro."
-        self.k = k
-        self.eps = eps
+        self.csv_path = spectral_sens_csv
         self.sum_to_one = sum_to_one
-        self.weight_param = nn.Parameter(torch.zeros(4, 1, k, k))  # 4 canali RGB-IR
-        self.register_buffer('identity', self._make_identity(), persistent=False)
-        self._init_as_identity()
+        self.eps = eps
+        self._dtype = dtype
+        self._device = torch.device(device)
 
-    def _make_identity(self):
-        w = torch.zeros(4, 1, self.k, self.k)
-        w[:, :, self.k//2, self.k//2] = 1.0
-        return w
+        self._wl_sens_np, self._S_all_np = self._load_sens_csv(self.csv_path)   # (Ls,), (Ls,4)
 
-    def _init_as_identity(self):
-        with torch.no_grad():
-            target = self.identity.clamp_min(1e-6)
-            self.weight_param.copy_(_softplus_inv(target))
+        # cache dipendente da C
+        self.register_buffer("S", None, persistent=False)  # <-- FIX: buffer che segue .to(...)
+        self._S_C = None
+        self.weight_param = None  # nn.Parameter [C]
 
-    def kernel_nonneg(self):
-        # [4,1,k,k], >=0
-        w = F.softplus(self.weight_param) + self.eps
+    # ---------- forward ----------
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
+        assert X.dim() == 4, "X deve essere [B, C, H, W]"
+        B, C, H, W = X.shape
+        device, dtype = X.device, X.dtype                 # <-- FIX: prendi device/dtype da X
+
+        self._ensure_S(C, device, dtype)                 # <-- FIX: pass device/dtype
+        self._ensure_params(C, device, dtype)            # <-- FIX: pass device/dtype
+
+        f = self._current_f().to(device=device, dtype=dtype)     # [C]  <-- FIX
+        S = self.S.to(device=device, dtype=dtype)                 # [4,C] <-- FIX
+
+        Xf = X * f.view(1, C, 1, 1)                      # [B,C,H,W]
+        Y = torch.einsum("bchw,oc->bohw", Xf, S)         # [B,4,H,W]
+        return Y
+
+    # ---------- utilities ----------
+    def smoothness_penalty(self) -> torch.Tensor:
+        assert self.weight_param is not None, "Chiama forward prima."
+        f = self._current_f()
+        return (f[1:] - f[:-1]).pow(2).mean()
+
+    @torch.no_grad()
+    def current_filter(self) -> torch.Tensor:
+        return self._current_f().detach().cpu()
+
+    @torch.no_grad()
+    def effective_sensor(self) -> torch.Tensor:
+        assert self.S is not None and self.weight_param is not None
+        f = self._current_f().view(1, -1)
+        return (self.S * f).detach().cpu()
+
+    # ---------- internals ----------
+    def _ensure_params(self, C: int, device: torch.device, dtype: torch.dtype):
+        if self.weight_param is None:
+            p = torch.zeros(C, device=device, dtype=dtype)
+            with torch.no_grad():
+                p.copy_(_softplus_inv(torch.ones_like(p)))  # init f≈1
+            self.weight_param = nn.Parameter(p)
+        else:
+            if self.weight_param.numel() != C:
+                raise ValueError(f"C è cambiato ({self.weight_param.numel()} -> {C}). "
+                                 "Mantieni C fisso o gestisci la ricreazione del parametro.")
+            # assicurati che segua il device/dtype correnti
+            if self.weight_param.device != device or self.weight_param.dtype != dtype:
+                self.weight_param.data = self.weight_param.data.to(device=device, dtype=dtype)
+
+    def _current_f(self) -> torch.Tensor:
+        f = F.softplus(self.weight_param) + self.eps
         if self.sum_to_one:
-            # normalizza per canale (somma = 1)
-            s = w.sum(dim=(2,3), keepdim=True).clamp_min(self.eps)
-            w = w / s
-        return w
+            f = f / f.sum().clamp_min(self.eps)
+        return f
 
-    def smoothness_penalty(self):
-        # TV-L2
-        w = self.kernel_nonneg()
-        dx = w[:, :, 1:, :] - w[:, :, :-1, :]
-        dy = w[:, :, :, 1:] - w[:, :, :, :-1]
-        return (dx.pow(2).mean() + dy.pow(2).mean())
+    def _ensure_S(self, C: int, device: torch.device, dtype: torch.dtype):
+        """Costruisce/aggiorna S ∈ [4,C] interpolando il CSV sulla griglia 400..1000 con C punti."""
+        if (self.S is not None) and (self._S_C == C):
+            # già costruita per questo C: porta comunque a device/dtype correnti
+            self.S = self.S.to(device=device, dtype=dtype)
+            return
 
-    def forward(self, x):
-        # x: [B,4,H,W]
-        w = self.kernel_nonneg()
-        return F.conv2d(x, w, bias=None, stride=1, padding=self.k//2, groups=4)
+        wl_target = np.linspace(400.0, 1000.0, C, dtype=np.float64)
+        S_interp = np.zeros((4, C), dtype=np.float64)
+        for i in range(4):
+            S_interp[i] = np.interp(wl_target, self._wl_sens_np, self._S_all_np[:, i],
+                                    left=0.0, right=0.0)
+        S_t = torch.from_numpy(S_interp).to(device=device, dtype=dtype)   # <-- FIX
+        if self.sum_to_one:
+            S_t = S_t / (S_t.sum(dim=1, keepdim=True).clamp_min(self.eps))
+        # registra come buffer (sovrascrive quello precedente)
+        self.register_buffer("S", S_t, persistent=False)
+        self._S_C = C
+
+    @staticmethod
+    def _load_sens_csv(csv_path: str):
+        """Ritorna (wl_sens ∈ [Ls], S_all ∈ [Ls,4]) in ordine R,G,B,IR."""
+        with open(csv_path, "r") as f:
+            header = f.readline().strip().split(",")
+        hmap = {name.strip().lower(): i for i, name in enumerate(header)}
+        if "wavelength" not in hmap:
+            raise ValueError("Nel CSV manca 'wavelength'.")
+
+        data = np.genfromtxt(csv_path, delimiter=",", skip_header=1)
+        wl_sens = data[:, hmap["wavelength"]].astype(np.float64)
+
+        def col(name):
+            idx = hmap.get(name, None)
+            if idx is None:
+                raise ValueError(f"Manca la colonna '{name}' nel CSV.")
+            return idx
+
+        cols = [col("red"), col("green"), col("blue")]
+        ir_idx = hmap.get("ir850", hmap.get("ir", None))
+        if ir_idx is None:
+            raise ValueError("Manca la colonna 'ir850'/'ir' nel CSV.")
+        cols.append(ir_idx)
+
+        S_all = data[:, cols].astype(np.float64)  # (Ls, 4) R,G,B,IR
+        return wl_sens, S_all
 
 
 class JointDualFilterMST(nn.Module):
     """
-    Ramo A: filtro A su input
-    Ramo B: filtro B su input copiato
-    Fusione: concat (8 canali)
-    MST++: in_channels = 8 (concat)
-    Tutto ottimizzato congiuntamente.
+    Ramo A: filtro unico f_A(C) su radianza [B,C,H,W] + proiezione S[4,C]
+    Ramo B: filtro unico f_B(C) su radianza [B,C,H,W] + proiezione S[4,C]
+    Fusione: concat 8 canali → MST++
     """
-    def __init__(self, k=3, sum_to_one=False):
+    def __init__(self, spectral_sens_csv: str, device="cpu", dtype=torch.float32):
         super().__init__()
-
-        # due filtri indipendenti
-        self.filterA = PreFilter4ch(k=k, sum_to_one=sum_to_one)
-        self.filterB = PreFilter4ch(k=k, sum_to_one=sum_to_one)
-
-        mst_in_ch = 8
-
-        # MST++
-        self.mst = MST_Plus_Plus(in_channels=mst_in_ch)
+        self.filterA = Filter(spectral_sens_csv, device=device, dtype=dtype)
+        self.filterB = Filter(spectral_sens_csv, device=device, dtype=dtype)
+        self.mst = SpectralMLP()  # la tua rete già definita
 
     def smoothness_penalty(self):
-        # somma delle penalità dei due filtri
         return self.filterA.smoothness_penalty() + self.filterB.smoothness_penalty()
 
-    def forward(self, x4):
+    @torch.no_grad()
+    def current_filters(self):
+        """Restituisce f_A(λ) e f_B(λ) ∈ [C]."""
+        return self.filterA.current_filter(), self.filterB.current_filter()
+
+    @torch.no_grad()
+    def effective_sensors(self):
+        """Restituisce S_eff_A e S_eff_B ∈ [4,C]."""
+        return self.filterA.effective_sensor(), self.filterB.effective_sensor()
+
+    def forward(self, X):
         """
-        x4: [B,4,H,W]  (RGB-IR)
+        X: radianza [B, C, H, W]  (C=121 se 400..1000 ogni 5nm, ma può essere qualsiasi)
         """
-        xa = self.filterA(x4)
-        xb = self.filterB(x4)
-        x_fused = torch.cat([xa, xb], dim=1)  # [B,8,H,W]
-        y = self.mst(x_fused)                 # [B,121,H,W]
+        xa = self.filterA(X)                 # [B,4,H,W]
+        xb = self.filterB(X)                 # [B,4,H,W]
+        x8 = torch.cat([xa, xb], dim=1)     # [B,8,H,W]
+        return self.mst(x8)                 # [B,121,H,W] (o il tuo output)
+
+
+class SpectralMLP(nn.Module):
+    """
+    Input:  (B, 8, 16, 16)
+    Output: (B, 121, 16, 16)
+    MLP per-pixel: R^8 -> R^121 applicato su ogni (h,w).
+    """
+    def __init__(self, hidden_dim=256, num_layers=3, activation="gelu", out_activation=None):
+        super().__init__()
+        act = nn.GELU() if activation == "gelu" else nn.ReLU(inplace=True)
+
+        layers = []
+        in_dim = 8
+        for _ in range(max(0, num_layers - 1)):
+            layers += [nn.Linear(in_dim, hidden_dim), act]
+            in_dim = hidden_dim
+        layers.append(nn.Linear(in_dim, 121))
+        if out_activation == "relu":
+            layers.append(nn.ReLU(inplace=True))
+        elif out_activation == "softplus":
+            layers.append(nn.Softplus(beta=1.0, threshold=20.0))
+        self.mlp = nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, 8, 16, 16)
+        B, C, H, W = x.shape
+        assert (C, H, W) == (8, 16, 16), f"atteso (8,16,16), ricevuto {(C,H,W)}"
+        x = x.permute(0, 2, 3, 1).contiguous()   # (B,16,16,8)
+        x = x.view(B * H * W, 8)                 # (BHW, 8)
+        y = self.mlp(x)                          # (BHW, 121)
+        y = y.view(B, H, W, 121).permute(0, 3, 1, 2).contiguous()  # (B,121,16,16)
         return y
