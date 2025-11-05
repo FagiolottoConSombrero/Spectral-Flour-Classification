@@ -84,13 +84,14 @@ class LitReconThenSPAN(pl.LightningModule):
         # pipeline completa
         with torch.no_grad():
             hsi = self._reconstruct_hsi(x4)
-        print(hsi.shape)
         logits = self.model(hsi)  # (B,1)
         return logits
 
     def _step(self, batch, stage: str):
-        x4, y = batch                     # x4: [B,4,H,W], y: [B] o [B,1]
-        logits = self.model(x4)          # (B,1)
+        x4, y = batch
+        with torch.no_grad():  # recon congelato anche in train
+            hsi = self._reconstruct_hsi(x4)
+        logits = self.model(hsi)          # (B,1)
         y_int = y.long()
         y_f = y_int.float().unsqueeze(1)
         loss = self.criterion(logits, y_f)
