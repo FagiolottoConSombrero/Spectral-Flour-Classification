@@ -68,7 +68,7 @@ class LitReconThenSPAN(pl.LightningModule):
         self.recon.eval()
 
         # 2) Classificatore SPAN: input = 121 canali
-        in_channels = 8
+        in_channels = 121
         self.model = SPAN(num_in_ch=in_channels, feature_channels=48, bias=True, se=se)
 
         self.criterion = nn.BCEWithLogitsLoss()
