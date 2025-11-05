@@ -89,9 +89,7 @@ class LitReconThenSPAN(pl.LightningModule):
 
     def _step(self, batch, stage: str):
         x4, y = batch                     # x4: [B,4,H,W], y: [B] o [B,1]
-        with torch.no_grad():
-            hsi = self._reconstruct_hsi(x4, return_x8=True)
-        logits = self.model(hsi)          # (B,1)
+        logits = self.model(x4)          # (B,1)
         y_int = y.long()
         y_f = y_int.float().unsqueeze(1)
         loss = self.criterion(logits, y_f)
