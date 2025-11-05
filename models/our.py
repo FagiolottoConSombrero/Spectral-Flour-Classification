@@ -284,6 +284,7 @@ class MLPClassifier(nn.Module):
                     nn.init.zeros_(m.bias)
 
     def forward(self, x):
+        print(x.shape)
         if x.ndim == 3:
             x = x.squeeze(1)
         x = self.backbone(x)
