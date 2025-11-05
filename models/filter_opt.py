@@ -463,8 +463,9 @@ class JointDualFilterMST(nn.Module):
         xa = self.filterA(X)                 # [B,4,H,W]
         xb = self.filterB(X)                 # [B,4,H,W]
         x8 = torch.cat([xa, xb], dim=1)     # [B,8,H,W]
-        cube = self.mst(x8)
-        return cube.mean(dim=(2, 3))
+        #cube = self.mst(x8)
+        #return cube.mean(dim=(2, 3))
+        return self.mst(x8)
 
 
 class SpectralMLP(nn.Module):

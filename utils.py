@@ -1,5 +1,4 @@
 from pathlib import Path
-import math
 from torch.utils.data import DataLoader, random_split
 from data_loader import *
 from torch import nn, optim
@@ -70,7 +69,7 @@ class LitReconThenSPAN(pl.LightningModule):
 
         # 2) Classificatore SPAN: input = 121 canali
         in_channels = 8
-        self.model = MLPClassifier(input_dim=121, num_classes=1)
+        self.model = SPAN(num_in_ch=in_channels, feature_channels=48, bias=True, se=se)
 
         self.criterion = nn.BCEWithLogitsLoss()
 
