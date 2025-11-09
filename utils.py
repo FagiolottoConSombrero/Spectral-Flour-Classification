@@ -156,7 +156,7 @@ class SignalReconAndClassification(pl.LightningModule):
         self.recon.eval()
 
         # 2) Classificatore SPAN: input = 121 canali
-        self.model = ResMLP8to121()
+        self.model = MLPClassifier(input_dim=121, num_classes=1)
 
         self.criterion = nn.BCEWithLogitsLoss()
 
