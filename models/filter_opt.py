@@ -512,8 +512,7 @@ class DualFilterVector(nn.Module):
         self.filterB = Filter(spectral_sens_csv, device=device, dtype=dtype)
 
     def forward(self, Xvec):  # Xvec: (B, C)
-        print(Xvec.shape)
-        B, C = Xvec.shape
+        B, C = Xvec.squeeze(1).shape
         X4d = Xvec.view(B, C, 1, 1)     # (B,C,H=1,W=1)
 
         xa = self.filterA(X4d).view(B, 4)   # (B,4) = [R,G,B,IR] per filtro 1
