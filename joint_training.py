@@ -23,16 +23,17 @@ def main(
         epochs: int = 50,
         seed: int = 42,
         devices="auto",
-        recon_ckpt: str = ""
+        recon_ckpt: str = "",
+        patch: bool = True
 ):
     set_seed(seed)
 
     train_loader, val_loader = make_loaders(
-        data_root, sensor_root, rgb, ir, batch_size=batch_size, num_workers=num_workers, val_ratio=0.2
-    )
+        data_root, sensor_root, rgb, ir, patch_mean=patch, batch_size=batch_size, num_workers=num_workers,
+        val_ratio=0.2)
 
     # SPAN riceve 121 canali dall'HSI ricostruito
-    model = SignalReconAndClassification(recon_ckpt=recon_ckpt, sensor_root=sensor_root)
+    model = SignalReconAndClassification(recon_ckpt=recon_ckpt, spectral_sens_csv=sensor_root)
 
     # callback
     ckpt = ModelCheckpoint(dirpath=save_dir, filename="best", monitor="val_loss", mode="min", save_top_k=1)
@@ -65,6 +66,7 @@ if __name__ == "__main__":
     arg.add_argument("--seed", type=int, default=42)
     arg.add_argument("--rgb", type=bool, default=False)
     arg.add_argument("--ir", type=bool, default=False)
+    arg.add_argument("--patch_mean", type=bool, default=True)
     # nuovi argomenti
     arg.add_argument("--recon_ckpt", type=str, required=True, help="path ai pesi pre-addestrati di JointDualFilterMST (state_dict)")
     args = arg.parse_args()
@@ -79,5 +81,6 @@ if __name__ == "__main__":
         num_workers=args.num_workers,
         epochs=args.epochs,
         seed=args.seed,
-        recon_ckpt=args.recon_ckpt
+        recon_ckpt=args.recon_ckpt,
+        patch = args.patch_mean
     )

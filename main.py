@@ -179,5 +179,5 @@ if __name__ == "__main__":
         epochs=args.epochs,
         se=args.se,
         seed=args.seed,
-        patch=args.patch_mean,
+        patch=args.patch_mean
     )
