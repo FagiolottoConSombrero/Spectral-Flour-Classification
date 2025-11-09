@@ -20,14 +20,10 @@ def main(
         save_dir: str = "runs/span_lightning",
         batch_size: int = 8,
         num_workers: int = 4,
-        lr: float = 1e-3,
         epochs: int = 50,
         seed: int = 42,
-        se: bool = True,
         devices="auto",
-        recon_ckpt: str = "",
-        recon_k: int = 3,
-        recon_sum_to_one: bool = False,
+        recon_ckpt: str = ""
 ):
     set_seed(seed)
 
@@ -36,7 +32,7 @@ def main(
     )
 
     # SPAN riceve 121 canali dall'HSI ricostruito
-    model = LitReconThenSPAN(se=se, lr=lr, recon_ckpt=recon_ckpt, recon_k=recon_k, recon_sum_to_one=recon_sum_to_one, sensor_root=sensor_root)
+    model = SignalReconAndClassification(recon_ckpt=recon_ckpt, sensor_root=sensor_root)
 
     # callback
     ckpt = ModelCheckpoint(dirpath=save_dir, filename="best", monitor="val_loss", mode="min", save_top_k=1)
@@ -66,14 +62,11 @@ if __name__ == "__main__":
     arg.add_argument("--num_workers", type=int, default=4)
     arg.add_argument("--lr", type=float, default=1e-4)
     arg.add_argument("--epochs", type=int, default=50)
-    arg.add_argument("--se", type=bool, default=True)
     arg.add_argument("--seed", type=int, default=42)
     arg.add_argument("--rgb", type=bool, default=False)
     arg.add_argument("--ir", type=bool, default=False)
     # nuovi argomenti
     arg.add_argument("--recon_ckpt", type=str, required=True, help="path ai pesi pre-addestrati di JointDualFilterMST (state_dict)")
-    arg.add_argument("--recon_k", type=int, default=3)
-    arg.add_argument("--recon_sum_to_one", action="store_true")
     args = arg.parse_args()
 
     main(
@@ -84,11 +77,7 @@ if __name__ == "__main__":
         save_dir=args.save_dir,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
-        lr=args.lr,
         epochs=args.epochs,
-        se=args.se,
         seed=args.seed,
-        recon_ckpt=args.recon_ckpt,
-        recon_k=args.recon_k,
-        recon_sum_to_one=args.recon_sum_to_one,
+        recon_ckpt=args.recon_ckpt
     )

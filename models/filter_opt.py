@@ -499,3 +499,68 @@ class SpectralMLP(nn.Module):
         y = self.mlp(x)                          # (BHW, 121)
         y = y.view(B, H, W, 121).permute(0, 3, 1, 2).contiguous()  # (B,121,16,16)
         return y
+
+
+class DualFilterVector(nn.Module):
+    """
+    Usa due Filter esistenti ma con input vettoriali (B, C) invece di (B, C, H, W).
+    Output: y ∈ (B, 8) con ordine interleaved: [y1R,y2R,y1G,y2G,y1B,y2B,y1IR,y2IR].
+    """
+    def __init__(self, spectral_sens_csv: str, device="cpu", dtype=torch.float32):
+        super().__init__()
+        self.filterA = Filter(spectral_sens_csv, device=device, dtype=dtype)
+        self.filterB = Filter(spectral_sens_csv, device=device, dtype=dtype)
+
+    def forward(self, Xvec):  # Xvec: (B, C)
+        B, C = Xvec.shape
+        X4d = Xvec.view(B, C, 1, 1)     # (B,C,H=1,W=1)
+
+        xa = self.filterA(X4d).view(B, 4)   # (B,4) = [R,G,B,IR] per filtro 1
+        xb = self.filterB(X4d).view(B, 4)   # (B,4) = [R,G,B,IR] per filtro 2
+
+        # Interleaving per canale: [y1R,y2R, y1G,y2G, y1B,y2B, y1IR,y2IR]
+        y = torch.stack([xa[:,0], xb[:,0], xa[:,1], xb[:,1],
+                         xa[:,2], xb[:,2], xa[:,3], xb[:,3]], dim=1)  # (B,8)
+        return y
+
+    def filters_smoothness(self) -> torch.Tensor:
+        # versione che contribuisce al gradiente
+        return self.filterA.smoothness_penalty() + self.filterB.smoothness_penalty()
+
+
+class ResMLP8to121(nn.Module):
+    def __init__(self, width=256, depth=4, nonneg=True, norm_in=True):
+        super().__init__()
+        self.nonneg = nonneg
+        self.softplus = nn.Softplus(beta=1.0, threshold=20.0)
+
+        self.norm_in = norm_in
+        if norm_in:
+            self.mu = nn.Parameter(torch.zeros(8))
+            self.sig = nn.Parameter(torch.ones(8))
+
+        self.inp = nn.Linear(8, width)
+        self.blocks = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(width, width),
+                nn.ReLU(inplace=True),
+                nn.Linear(width, width),
+            ) for _ in range(depth)
+        ])
+        self.out = nn.Linear(width, 121)
+
+        # init xavier
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None: nn.init.zeros_(m.bias)
+
+    def forward(self, x):          # x: (B,8)
+        if self.norm_in:
+            x = (x - self.mu) / (self.sig.abs() + 1e-6)
+        h = F.relu(self.inp(x), inplace=True)
+        for blk in self.blocks:
+            h = h + blk(h)         # residual
+            h = F.relu(h, inplace=True)
+        y = self.out(h)            # (B,121)
+        return self.softplus(y) if self.nonneg else y

@@ -122,3 +122,90 @@ class LitReconThenSPAN(pl.LightningModule):
     def on_fit_start(self):
         # assicura che il ricostruttore sia sullo stesso device
         self.recon.to(self.device)
+
+
+# ------------- LightningModule -------------
+class SignalReconAndClassification(pl.LightningModule):
+    """
+    Pipeline: 4ch (RGB-IR) --[ JointDualFilterMST (frozen) ]--> HSI (121ch) --[ SPAN ]--> logit (B,1)
+    Loss: BCEWithLogits
+    """
+    def __init__(self, recon_ckpt: str, sensor_root, lr: float = 1e-4):
+        super().__init__()
+        self.save_hyperparameters()
+
+        # 1) Ricostruttore (congelato)
+        self.recon = DualFilterVector(sensor_root)
+        if recon_ckpt and len(recon_ckpt) > 0:
+            ckpt = torch.load(recon_ckpt, map_location="cpu")
+            # supporto sia {"state_dict": ...} (Lightning) sia state_dict diretto
+            state = ckpt.get("state_dict", ckpt)
+            # se è stato salvato con prefissi tipo "model." o simili, provo a ripulire
+            cleaned = {}
+            for k, v in state.items():
+                nk = k
+                if nk.startswith("model.") or nk.startswith("recon."):
+                    nk = nk.split(".", 1)[1]
+                cleaned[nk] = v
+            missing, unexpected = self.recon.load_state_dict(cleaned, strict=False)
+            if len(missing) or len(unexpected):
+                print(f"[WARN] Recon state_dict: missing={missing}, unexpected={unexpected}")
+        # congelo
+        for p in self.recon.parameters():
+            p.requires_grad = False
+        self.recon.eval()
+
+        # 2) Classificatore SPAN: input = 121 canali
+        self.model = ResMLP8to121()
+
+        self.criterion = nn.BCEWithLogitsLoss()
+
+    @torch.no_grad()
+    def _reconstruct_hsi(self, x4):
+        # x4: [B,4,H,W] -> [B,121,H,W]
+        self.recon.eval()
+        return self.recon(x4)
+
+    def forward(self, x4):
+        # pipeline completa
+        with torch.no_grad():
+            hsi = self._reconstruct_hsi(x4)
+        logits = self.model(hsi)  # (B,1)
+        return logits
+
+    def _step(self, batch, stage: str):
+        x4, y = batch
+        with torch.no_grad():  # recon congelato anche in train
+            hsi = self._reconstruct_hsi(x4)
+        logits = self.model(hsi)          # (B,1)
+        y_int = y.long()
+        y_f = y_int.float().unsqueeze(1)
+        loss = self.criterion(logits, y_f)
+        pred = (logits.view(-1) >= 0.5).long()
+        acc = (pred == y_int.view(-1)).float().mean()
+        self.log(f"{stage}_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
+        self.log(f"{stage}_acc", acc, prog_bar=True, on_step=False, on_epoch=True)
+        return loss
+
+    def training_step(self, batch, batch_idx):
+        return self._step(batch, "train")
+
+    def validation_step(self, batch, batch_idx):
+        self._step(batch, "val")
+
+    def configure_optimizers(self):
+        opt = optim.Adam(self.model.parameters(), lr=self.hparams.lr)  # ottimizziamo SOLO lo SPAN
+        sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="min", factor=0.5, patience=50)
+        return {
+            "optimizer": opt,
+            "lr_scheduler": {
+                "scheduler": sched,
+                "monitor": "val_loss",
+                "interval": "epoch",
+                "frequency": 1,
+            },
+        }
+
+    def on_fit_start(self):
+        # assicura che il ricostruttore sia sullo stesso device
+        self.recon.to(self.device)
