@@ -167,11 +167,11 @@ class FrozenFullRecon(nn.Module):
         self.dec = core.dec     # decoder: 8 -> 121
 
         # congela tutto
-        for p in self.parameters():
-            p.requires_grad = False
-        self.eval()
+        #for p in self.parameters():
+            #p.requires_grad = False
+        #self.eval()
 
-    @torch.no_grad()
+    #@torch.no_grad()
     def forward(self, s_true: torch.Tensor) -> torch.Tensor:
         """
         Esegue la pipeline completa: s_true [B,121] -> meas(121→8) -> dec(8→121)
@@ -208,14 +208,14 @@ class SignalReconAndClassification(pl.LightningModule):
         self.criterion = nn.BCEWithLogitsLoss()
         self.lr = lr
 
-    @torch.no_grad()
+    #@torch.no_grad()
     def _reconstruct(self, s_true):
         return self.recon(s_true)
 
     def forward(self, s_true):
         # Ricostruzione e classificazione
-        with torch.no_grad():
-            s_pred = self._reconstruct(s_true)   # (B,121)
+        #with torch.no_grad():
+        s_pred = self._reconstruct(s_true)   # (B,121)
         logits = self.model(s_pred)              # (B,1)
         return logits
 
