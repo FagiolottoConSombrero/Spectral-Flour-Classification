@@ -26,12 +26,29 @@ def plot_spectrum_pair(
     s_recon: np.ndarray,
     title: str,
     out_path: str,
-    wavelengths: np.ndarray = None
+    wavelengths: np.ndarray = None,
+    eps: float = 1e-8
 ):
-    """Plot di uno spettro GT vs ricostruito e salvataggio su file."""
+    """Plot di uno spettro GT vs ricostruito, salvataggio, e stampa metriche."""
     if wavelengths is None:
         wavelengths = np.arange(len(s_true))
 
+    # ---- METRICHE ----
+    mse = np.mean((s_true - s_recon) ** 2)
+    rmse = np.sqrt(mse)
+
+    mrae = np.mean(np.abs(s_true - s_recon) / (s_true + eps))
+
+    # PSNR (MAX=1 perché spettro normalizzato)
+    psnr = 20 * np.log10(1.0 / np.sqrt(mse + eps))
+
+    print(f"--- Metrics for: {title} ---")
+    print(f"RMSE: {rmse:.6f}")
+    print(f"MRAE: {mrae:.6f}")
+    print(f"PSNR: {psnr:.3f} dB")
+    print("---------------------------------\n")
+
+    # ---- PLOT ----
     plt.figure()
     plt.plot(wavelengths, s_true, label="GT")
     plt.plot(wavelengths, s_recon, linestyle="--", label="Recon")
@@ -39,12 +56,15 @@ def plot_spectrum_pair(
     plt.ylabel("Valore spettrale")
     plt.title(title)
     plt.legend()
+
     plt.ylim(0, 1)
     plt.grid(True, linestyle="--", alpha=0.4)
+
     plt.tight_layout()
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     plt.savefig(out_path, dpi=150)
     plt.close()
+
 
 
 # ---------- raccolta statistiche ricostruzione ----------
