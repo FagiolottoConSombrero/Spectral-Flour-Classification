@@ -81,8 +81,6 @@ def collect_recon_stats(
 
             # ricostruzione
             s_recon = recon_model(s_true)  # (B,121)
-            print(f"Shape ricostruito: {s_recon.shape}")
-            print(f"Shape GT: {s_true.shape}")
 
             # MSE spettrale per campione
             mse = ((s_recon - s_true) ** 2).mean(dim=1)  # (B,)
