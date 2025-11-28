@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+
 class FlourFolderDataset(Dataset):
     """
     Legge HSI in .h5 organizzati per classi: root/class_name/*.h5

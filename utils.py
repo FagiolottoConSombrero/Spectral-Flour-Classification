@@ -5,6 +5,7 @@ from torch import nn, optim
 import pytorch_lightning as pl
 from models.our import *
 from models.filter_opt import *
+import matplotlib.pyplot as plt
 
 
 def make_loaders(root, sensor_root, rgb, ir, patch_mean, batch_size=8, num_workers=4, val_ratio=0.2, pin_memory=True):
@@ -257,3 +258,116 @@ class SignalReconAndClassification(pl.LightningModule):
 
     def on_fit_start(self):
         self.recon.to(self.device)
+
+
+def plot_spectrum_pair(
+    s_true: np.ndarray,
+    s_recon: np.ndarray,
+    title: str,
+    out_path: str,
+    wavelengths: np.ndarray = None
+):
+    """
+    Plot di uno spettro GT vs ricostruito e salvataggio su file.
+    s_true, s_recon: (121,)
+    """
+    if wavelengths is None:
+        wavelengths = np.arange(len(s_true))
+
+    plt.figure()
+    plt.plot(wavelengths, s_true, label="GT")
+    plt.plot(wavelengths, s_recon, linestyle="--", label="Recon")
+    plt.xlabel("Band index" if wavelengths is None else "Wavelength")
+    plt.ylabel("Valore spettrale")
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+
+
+def collect_recon_stats(model: SignalReconAndClassification,
+                        loader,
+                        device: torch.device):
+    model.eval()
+    model.to(device)
+
+    all_mse = []
+    all_y = []
+    all_s_true = []
+    all_s_recon = []
+
+    with torch.no_grad():
+        for x, y in loader:
+            x = x.to(device)               # (B,121)
+            y = y.to(device)               # (B,)
+            # ricostruzione
+            s_recon = model._reconstruct(x)    # (B,121)
+
+            # MSE spettrale per campione
+            mse = ((s_recon - x) ** 2).mean(dim=1)  # (B,)
+
+            all_mse.append(mse.cpu())
+            all_y.append(y.cpu())
+            all_s_true.append(x.cpu())
+            all_s_recon.append(s_recon.cpu())
+
+    all_mse = torch.cat(all_mse).numpy()                # (N,)
+    all_y = torch.cat(all_y).numpy().astype(int)        # (N,)
+    all_s_true = torch.cat(all_s_true).numpy()          # (N,121)
+    all_s_recon = torch.cat(all_s_recon).numpy()        # (N,121)
+
+    return all_mse, all_y, all_s_true, all_s_recon
+
+
+def plot_best_worst_per_class(
+    model: SignalReconAndClassification,
+    val_loader,
+    device: torch.device,
+    out_dir: str = "debug_plots",
+    num_best: int = 5,
+    num_worst: int = 5,
+    wavelengths: np.ndarray = None
+):
+    os.makedirs(out_dir, exist_ok=True)
+
+    mse, y, s_true, s_recon = collect_recon_stats(model, val_loader, device)
+
+    for cls in [0, 1]:
+        idx_cls = np.where(y == cls)[0]
+        if len(idx_cls) == 0:
+            print(f"[WARN] Nessun campione per classe {cls}")
+            continue
+
+        # ordina per MSE crescente
+        idx_sorted = idx_cls[np.argsort(mse[idx_cls])]
+        best_idx = idx_sorted[:min(num_best, len(idx_sorted))]
+        worst_idx = idx_sorted[-min(num_worst, len(idx_sorted)):]
+
+        # --- BEST ---
+        for rank, i in enumerate(best_idx):
+            title = f"Class {cls} - BEST #{rank+1} - MSE={mse[i]:.4e}"
+            out_path = os.path.join(out_dir, f"class{cls}_best_{rank+1}_idx{i}.png")
+            plot_spectrum_pair(
+                s_true[i],
+                s_recon[i],
+                title,
+                out_path,
+                wavelengths=wavelengths
+            )
+
+        # --- WORST ---
+        for rank, i in enumerate(worst_idx):
+            title = f"Class {cls} - WORST #{rank+1} - MSE={mse[i]:.4e}"
+            out_path = os.path.join(out_dir, f"class{cls}_worst_{rank+1}_idx{i}.png")
+            plot_spectrum_pair(
+                s_true[i],
+                s_recon[i],
+                title,
+                out_path,
+                wavelengths=wavelengths
+            )
+
+    print(f"Plot salvati in: {out_dir}")
+
