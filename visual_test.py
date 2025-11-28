@@ -40,6 +40,7 @@ def plot_spectrum_pair(
     plt.title(title)
     plt.legend()
     plt.ylim(0, 1)
+    plt.grid(True, linestyle="--", alpha=0.4)
     plt.tight_layout()
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     plt.savefig(out_path, dpi=150)
