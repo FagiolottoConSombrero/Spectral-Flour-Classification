@@ -47,14 +47,16 @@ def plot_spectrum_pair(
 
 def compute_val_metrics(S_true: np.ndarray, S_recon: np.ndarray, eps: float = 1e-8):
     """
-    Calcola RMSE, MRAE e PSNR sull'intero validation set.
+    Calcola RMSE, MRAE, PSNR e SAM sull'intero validation set.
 
     S_true  : array N×L
     S_recon : array N×L
     """
     assert S_true.shape == S_recon.shape, f"Shape mismatch: {S_true.shape} vs {S_recon.shape}"
 
+    # -------------------------
     # MSE per spettro (su tutte le bande)
+    # -------------------------
     mse_per_sample = np.mean((S_true - S_recon) ** 2, axis=1)
 
     # RMSE globale
@@ -63,10 +65,23 @@ def compute_val_metrics(S_true: np.ndarray, S_recon: np.ndarray, eps: float = 1e
     # MRAE globale
     mrae = np.mean(np.abs(S_true - S_recon) / (S_true + eps))
 
-    # PSNR globale (MAX=1 perché gli spettri sono normalizzati in [0,1])
+    # PSNR globale (MAX=1)
     psnr = 20 * np.log10(1.0 / np.sqrt(np.mean(mse_per_sample) + eps))
 
-    return rmse, mrae, psnr
+    # -------------------------
+    # SAM (Spectral Angle Mapper)
+    # -------------------------
+    dot = np.sum(S_true * S_recon, axis=1)
+    norm_gt = np.linalg.norm(S_true, axis=1)
+    norm_recon = np.linalg.norm(S_recon, axis=1)
+
+    cos_theta = dot / (norm_gt * norm_recon + eps)
+    cos_theta = np.clip(cos_theta, -1.0, 1.0)  # per stabilità numerica
+
+    sam = np.mean(np.arccos(cos_theta))  # SAM medio (in radianti)
+
+    return rmse, mrae, psnr, sam
+
 
 
 # ---------- raccolta statistiche ricostruzione ----------
@@ -226,12 +241,12 @@ def main(
         device=device,
     )
 
-    # ====== CALCOLO METRICHE GLOBALI (VAL) ======
-    rmse, mrae, psnr = compute_val_metrics(s_true, s_recon)
+    rmse, mrae, psnr, sam = compute_val_metrics(s_true, s_recon)
     print("===== Validation Metrics =====")
     print(f"Validation RMSE: {rmse:.6f}")
     print(f"Validation MRAE: {mrae:.6f}")
     print(f"Validation PSNR: {psnr:.3f} dB")
+    print(f"Validation SAM : {sam:.6f} rad  ({sam * 180 / np.pi:.3f} deg)")
     print("================================\n")
 
     # ====== PLOT BEST/WORST PER CLASSE ======
