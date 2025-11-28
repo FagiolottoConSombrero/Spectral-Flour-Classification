@@ -9,9 +9,7 @@ import matplotlib.pyplot as plt
 
 from utils import make_loaders
 from utils import FrozenFullRecon
-# importa qui la tua FrozenFullRecon (ad es. dallo stesso file o dal modulo giusto)
-# from models.recon import FrozenFullRecon
-# oppure se è nello stesso file, ignora l'import
+
 
 # ---------------- util ----------------
 def set_seed(seed=42):
@@ -26,29 +24,12 @@ def plot_spectrum_pair(
     s_recon: np.ndarray,
     title: str,
     out_path: str,
-    wavelengths: np.ndarray = None,
-    eps: float = 1e-8
+    wavelengths: np.ndarray = None
 ):
-    """Plot di uno spettro GT vs ricostruito, salvataggio, e stampa metriche."""
+    """Plot di uno spettro GT vs ricostruito e salvataggio su file."""
     if wavelengths is None:
         wavelengths = np.arange(len(s_true))
 
-    # ---- METRICHE ----
-    mse = np.mean((s_true - s_recon) ** 2)
-    rmse = np.sqrt(mse)
-
-    mrae = np.mean(np.abs(s_true - s_recon) / (s_true + eps))
-
-    # PSNR (MAX=1 perché spettro normalizzato)
-    psnr = 20 * np.log10(1.0 / np.sqrt(mse + eps))
-
-    print(f"--- Metrics for: {title} ---")
-    print(f"RMSE: {rmse:.6f}")
-    print(f"MRAE: {mrae:.6f}")
-    print(f"PSNR: {psnr:.3f} dB")
-    print("---------------------------------\n")
-
-    # ---- PLOT ----
     plt.figure()
     plt.plot(wavelengths, s_true, label="GT")
     plt.plot(wavelengths, s_recon, linestyle="--", label="Recon")
@@ -56,15 +37,36 @@ def plot_spectrum_pair(
     plt.ylabel("Valore spettrale")
     plt.title(title)
     plt.legend()
-
     plt.ylim(0, 1)
     plt.grid(True, linestyle="--", alpha=0.4)
-
     plt.tight_layout()
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     plt.savefig(out_path, dpi=150)
     plt.close()
 
+
+def compute_val_metrics(S_true: np.ndarray, S_recon: np.ndarray, eps: float = 1e-8):
+    """
+    Calcola RMSE, MRAE e PSNR sull'intero validation set.
+
+    S_true  : array N×L
+    S_recon : array N×L
+    """
+    assert S_true.shape == S_recon.shape, f"Shape mismatch: {S_true.shape} vs {S_recon.shape}"
+
+    # MSE per spettro (su tutte le bande)
+    mse_per_sample = np.mean((S_true - S_recon) ** 2, axis=1)
+
+    # RMSE globale
+    rmse = np.sqrt(np.mean(mse_per_sample))
+
+    # MRAE globale
+    mrae = np.mean(np.abs(S_true - S_recon) / (S_true + eps))
+
+    # PSNR globale (MAX=1 perché gli spettri sono normalizzati in [0,1])
+    psnr = 20 * np.log10(1.0 / np.sqrt(np.mean(mse_per_sample) + eps))
+
+    return rmse, mrae, psnr
 
 
 # ---------- raccolta statistiche ricostruzione ----------
@@ -78,6 +80,11 @@ def collect_recon_stats(
       - ricostruire ogni spettro
       - calcolare MSE spettrale
       - salvare GT, Recon, label
+
+    Assunzione: il loader restituisce (x, y),
+    dove:
+      - x è lo spettro o il tensore da cui ricavare lo spettro
+      - y è la label (classe)
     """
     recon_model.eval()
     recon_model.to(device)
@@ -89,20 +96,22 @@ def collect_recon_stats(
 
     with torch.no_grad():
         for x, y in loader:
-            x = x.to(device)  # (B,121) oppure (B,121,H,W)
+            x = x.to(device)  # (B,121) oppure (B,1,121) oppure (B,121,H,W)
             y = y.to(device)  # (B,)
 
-            # porta tutto a spettro medio [B,121]
+            # porta tutto a spettro [B, L]
             if x.dim() == 4:
-                # (B,121,H,W) -> media spaziale
+                # (B, C, H, W) -> media spaziale sulle dimensioni H,W
+                # ipotesi: C = 121
                 s_true = x.mean(dim=(2, 3))
-                s_true = s_true.squeeze(1)
             else:
-                s_true = x  # (B,121)
-                s_true = s_true.squeeze(1)
+                # (B, L) oppure (B, 1, L)
+                s_true = x
+                if s_true.dim() == 3 and s_true.shape[1] == 1:
+                    s_true = s_true[:, 0, :]
 
-            # ricostruzione
-            s_recon = recon_model(s_true)  # (B,121)
+            # ricostruzione: il modello prende in input s_true (adatta se il tuo modello si aspetta altro)
+            s_recon = recon_model(s_true)  # (B, L) atteso
 
             # MSE spettrale per campione
             mse = ((s_recon - s_true) ** 2).mean(dim=1)  # (B,)
@@ -114,25 +123,24 @@ def collect_recon_stats(
 
     all_mse = torch.cat(all_mse).numpy()           # (N,)
     all_y = torch.cat(all_y).numpy().astype(int)   # (N,)
-    all_s_true = torch.cat(all_s_true).numpy()     # (N,121)
-    all_s_recon = torch.cat(all_s_recon).numpy()   # (N,121)
+    all_s_true = torch.cat(all_s_true).numpy()     # (N,L)
+    all_s_recon = torch.cat(all_s_recon).numpy()   # (N,L)
 
     return all_mse, all_y, all_s_true, all_s_recon
 
 
 # ---------- selezione best/worst e plot ----------
 def plot_best_worst_per_class(
-    recon_model: nn.Module,
-    val_loader,
-    device: torch.device,
+    mse: np.ndarray,
+    y: np.ndarray,
+    s_true: np.ndarray,
+    s_recon: np.ndarray,
     out_dir: str = "debug_plots_recon",
     num_best: int = 5,
     num_worst: int = 5,
     wavelengths: np.ndarray = None
 ):
     os.makedirs(out_dir, exist_ok=True)
-
-    mse, y, s_true, s_recon = collect_recon_stats(recon_model, val_loader, device)
 
     for cls in [0, 1]:
         idx_cls = np.where(y == cls)[0]
@@ -147,7 +155,7 @@ def plot_best_worst_per_class(
 
         # BEST
         for rank, i in enumerate(best_idx):
-            title = f"Class {cls} - BEST #{rank + 1} - MSE={np.mean(mse[i]):.4e}"
+            title = f"Class {cls} - BEST #{rank + 1} - MSE={mse[i]:.4e}"
             out_path = os.path.join(out_dir, f"class{cls}_best_{rank+1}_idx{i}.png")
             plot_spectrum_pair(
                 s_true[i],
@@ -159,7 +167,7 @@ def plot_best_worst_per_class(
 
         # WORST
         for rank, i in enumerate(worst_idx):
-            title = f"Class {cls} - WORST #{rank + 1} - MSE={np.mean(mse[i]):.4}"
+            title = f"Class {cls} - WORST #{rank + 1} - MSE={mse[i]:.4e}"
             out_path = os.path.join(out_dir, f"class{cls}_worst_{rank+1}_idx{i}.png")
             plot_spectrum_pair(
                 s_true[i],
@@ -211,11 +219,28 @@ def main(
     # esempio:
     # wavelengths = np.linspace(400, 720, 121)
 
+    # ====== RACCOLTA STATISTICHE SUL VALIDATION ======
+    mse, y, s_true, s_recon = collect_recon_stats(
+        recon_model=recon_model,
+        loader=val_loader,
+        device=device,
+    )
+
+    # ====== CALCOLO METRICHE GLOBALI (VAL) ======
+    rmse, mrae, psnr = compute_val_metrics(s_true, s_recon)
+    print("===== Validation Metrics =====")
+    print(f"Validation RMSE: {rmse:.6f}")
+    print(f"Validation MRAE: {mrae:.6f}")
+    print(f"Validation PSNR: {psnr:.3f} dB")
+    print("================================\n")
+
+    # ====== PLOT BEST/WORST PER CLASSE ======
     out_dir = os.path.join(save_dir, "recon_debug_plots")
     plot_best_worst_per_class(
-        recon_model,
-        val_loader,
-        device=device,
+        mse=mse,
+        y=y,
+        s_true=s_true,
+        s_recon=s_recon,
         out_dir=out_dir,
         num_best=5,
         num_worst=5,
@@ -251,4 +276,5 @@ if __name__ == "__main__":
         recon_ckpt=args.recon_ckpt,
         patch=args.patch_mean,
     )
+
 
