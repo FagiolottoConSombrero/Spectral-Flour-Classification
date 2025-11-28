@@ -74,13 +74,15 @@ def collect_recon_stats(
             if x.dim() == 4:
                 # (B,121,H,W) -> media spaziale
                 s_true = x.mean(dim=(2, 3))
+                s_true = s_true.squeeze(1)
             else:
                 s_true = x  # (B,121)
+                s_true = s_true.squeeze(1)
 
             # ricostruzione
             s_recon = recon_model(s_true)  # (B,121)
-            print(f"Shape ricostruito{s_recon.shape}")
-            print(f"Shape GT{s_true.shape}")
+            print(f"Shape ricostruito: {s_recon.shape}")
+            print(f"Shape GT: {s_true.shape}")
 
             # MSE spettrale per campione
             mse = ((s_recon - s_true) ** 2).mean(dim=1)  # (B,)
