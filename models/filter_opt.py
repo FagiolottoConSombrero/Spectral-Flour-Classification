@@ -564,3 +564,35 @@ class ResMLP8to121(nn.Module):
             h = F.relu(h, inplace=True)
         y = self.out(h)            # (B,121)
         return self.softplus(y) if self.nonneg else y
+
+
+class TinySpecFormer(nn.Module):
+    def __init__(self, d_model=192, nhead=6, num_layers=2, nonneg=True):
+        super().__init__()
+        self.nonneg = nonneg
+        self.softplus = nn.Softplus(beta=1.0, threshold=20.0)
+
+        self.obs_proj = nn.Linear(8, d_model)                   # 8 -> d
+        self.q_emb = nn.Parameter(torch.randn(121, d_model))    # 121 query (una per λ)
+
+        enc_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead, dim_feedforward=4*d_model,
+            batch_first=True, activation="relu"
+        )
+        self.enc = nn.TransformerEncoder(enc_layer, num_layers=1)
+
+        dec_layer = nn.TransformerDecoderLayer(
+            d_model=d_model, nhead=nhead, dim_feedforward=4*d_model,
+            batch_first=True, activation="relu"
+        )
+        self.dec = nn.TransformerDecoder(dec_layer, num_layers=num_layers)
+
+        self.head = nn.Linear(d_model, 1)
+
+    def forward(self, x):                  # x: (B,8)
+        mem = self.obs_proj(x).unsqueeze(1)   # (B,1,d)
+        mem = self.enc(mem)                   # (B,1,d)
+        Q = self.q_emb.unsqueeze(0).expand(x.size(0), -1, -1)  # (B,121,d)
+        H = self.dec(Q, mem)                  # (B,121,d)
+        y = self.head(H).squeeze(-1)          # (B,121)
+        return self.softplus(y) if self.nonneg else y
