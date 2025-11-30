@@ -352,7 +352,7 @@ def plot_best_worst_per_class(
 
         # --- BEST ---
         for rank, i in enumerate(best_idx):
-            title = f"Class {cls} - BEST #{rank + 1} - MSE={mse[i].item():.4e | SAM={sam[i]:.6f} rad}"
+            title = f"Class {cls} - BEST #{rank + 1} | MSE={mse[i].item():.4e | SAM={sam[i]:.6f} rad}"
 
             out_path = os.path.join(out_dir, f"class{cls}_best_{rank+1}_idx{i}.png")
             plot_spectrum_pair(
@@ -365,7 +365,7 @@ def plot_best_worst_per_class(
 
         # --- WORST ---
         for rank, i in enumerate(worst_idx):
-            title = f"Class {cls} - WORST #{rank +1 } - MSE={mse[i].item:.4e | SAM={sam[i]:.6f} rad}"
+            title = f"Class {cls} - WORST #{rank +1 } | MSE={mse[i].item:.4e | SAM={sam[i]:.6f} rad}"
             out_path = os.path.join(out_dir, f"class{cls}_worst_{rank+1}_idx{i}.png")
             plot_spectrum_pair(
                 s_true[i],
