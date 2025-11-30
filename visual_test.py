@@ -7,8 +7,7 @@ import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 
-from utils import make_loaders
-from utils import FrozenFullRecon
+from utils import make_loaders, FrozenFullRecon, spectral_angle_mapper
 
 
 # ---------------- util ----------------
@@ -83,7 +82,6 @@ def compute_val_metrics(S_true: np.ndarray, S_recon: np.ndarray, eps: float = 1e
     return rmse, mrae, psnr, sam
 
 
-
 # ---------- raccolta statistiche ricostruzione ----------
 def collect_recon_stats(
     recon_model: nn.Module,
@@ -105,6 +103,7 @@ def collect_recon_stats(
     recon_model.to(device)
 
     all_mse = []
+    all_sam = []
     all_y = []
     all_s_true = []
     all_s_recon = []
@@ -130,18 +129,21 @@ def collect_recon_stats(
 
             # MSE spettrale per campione
             mse = ((s_recon - s_true) ** 2).mean(dim=1)  # (B,)
+            sam = spectral_angle_mapper(s_true, s_recon)
 
             all_mse.append(mse.cpu())
+            all_sam.append(sam.cpu())
             all_y.append(y.cpu())
             all_s_true.append(s_true.cpu())
             all_s_recon.append(s_recon.cpu())
 
     all_mse = torch.cat(all_mse).numpy()           # (N,)
-    all_y = torch.cat(all_y).numpy().astype(int)   # (N,)
-    all_s_true = torch.cat(all_s_true).numpy()     # (N,L)
-    all_s_recon = torch.cat(all_s_recon).numpy()   # (N,L)
+    all_sam = torch.cat(all_sam, dim=0).numpy()  # (N,)
+    all_y = torch.cat(all_y, dim=0).numpy().astype(int)  # (N,)
+    all_s_true = torch.cat(all_s_true, dim=0).numpy()  # (N,121)
+    all_s_recon = torch.cat(all_s_recon, dim=0).numpy()  # (N,121)
 
-    return all_mse, all_y, all_s_true, all_s_recon
+    return all_mse, all_sam, all_y, all_s_true, all_s_recon
 
 
 # ---------- selezione best/worst e plot ----------
@@ -242,11 +244,7 @@ def main(
     # wavelengths = np.linspace(400, 720, 121)
 
     # ====== RACCOLTA STATISTICHE SUL VALIDATION ======
-    mse, y, s_true, s_recon = collect_recon_stats(
-        recon_model=recon_model,
-        loader=val_loader,
-        device=device,
-    )
+    mse, sam, y, s_true, s_recon = collect_recon_stats(recon_model, val_loader, device)
 
     rmse, mrae, psnr, sam = compute_val_metrics(s_true, s_recon)
     print("===== Validation Metrics =====")
