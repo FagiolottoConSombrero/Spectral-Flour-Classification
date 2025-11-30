@@ -244,7 +244,7 @@ def main(
     # wavelengths = np.linspace(400, 720, 121)
 
     # ====== RACCOLTA STATISTICHE SUL VALIDATION ======
-    mse, sam, y, s_true, s_recon = collect_recon_stats(recon_model, val_loader, device)
+    mse, sam_1, y, s_true, s_recon = collect_recon_stats(recon_model, val_loader, device)
 
     rmse, mrae, psnr, sam = compute_val_metrics(s_true, s_recon)
     print("===== Validation Metrics =====")
@@ -258,7 +258,7 @@ def main(
     out_dir = os.path.join(save_dir, "recon_debug_plots")
     plot_best_worst_per_class(
         mse=mse,
-        sam=sam,
+        sam=sam_1,
         y=y,
         s_true=s_true,
         s_recon=s_recon,
