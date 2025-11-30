@@ -386,14 +386,21 @@ def plot_best_worst_per_class(
 
 def spectral_angle_mapper(s_true: torch.Tensor, s_recon: torch.Tensor) -> torch.Tensor:
     """
-    Calcola il SAM in radianti tra due spettri.
-    s_true, s_recon: (B,121)
-    Ritorna: (B,)
+    Calcola il SAM per batch.
+    s_true, s_recon: (B, C)
+    Ritorna: (B,) in radianti
     """
-    dot = (s_true * s_recon).sum(dim=1)
-    norm_true = torch.norm(s_true, dim=1)
-    norm_recon = torch.norm(s_recon, dim=1)
+    # prodotto scalare per campione
+    dot = (s_true * s_recon).sum(dim=1)           # (B,)
+
+    # norme per campione
+    norm_true = torch.norm(s_true, dim=1)         # (B,)
+    norm_recon = torch.norm(s_recon, dim=1)       # (B,)
+
+    # coseno dell'angolo
     cosang = dot / (norm_true * norm_recon + 1e-8)
     cosang = cosang.clamp(-1 + 1e-7, 1 - 1e-7)
-    angle = torch.acos(cosang)
+
+    angle = torch.acos(cosang)                    # (B,)
     return angle
+
