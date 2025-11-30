@@ -337,7 +337,7 @@ def plot_best_worst_per_class(
 ):
     os.makedirs(out_dir, exist_ok=True)
 
-    mse, y, s_true, s_recon = collect_recon_stats(model, val_loader, device)
+    mse, sam, y, s_true, s_recon = collect_recon_stats(model, val_loader, device)
 
     for cls in [0, 1]:
         idx_cls = np.where(y == cls)[0]
