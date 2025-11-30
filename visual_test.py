@@ -147,6 +147,7 @@ def collect_recon_stats(
 # ---------- selezione best/worst e plot ----------
 def plot_best_worst_per_class(
     mse: np.ndarray,
+    sam: np.ndarray,
     y: np.ndarray,
     s_true: np.ndarray,
     s_recon: np.ndarray,
@@ -170,7 +171,10 @@ def plot_best_worst_per_class(
 
         # BEST
         for rank, i in enumerate(best_idx):
-            title = f"Class {cls} - BEST #{rank + 1} - MSE={mse[i]:.4f}"
+            title = (
+                f"Class {cls} - BEST #{rank + 1} | "
+                f"MSE={mse[i]:.4f} | SAM={sam[i]:.4f} rad"
+            )
             out_path = os.path.join(out_dir, f"class{cls}_best_{rank+1}_idx{i}.png")
             plot_spectrum_pair(
                 s_true[i],
@@ -182,7 +186,10 @@ def plot_best_worst_per_class(
 
         # WORST
         for rank, i in enumerate(worst_idx):
-            title = f"Class {cls} - WORST #{rank + 1} - MSE={mse[i]:.4f}"
+            title = (
+                f"Class {cls} - WORST #{rank + 1} | "
+                f"MSE={mse[i]:.4f} | SAM={sam[i]:.4f} rad"
+            )
             out_path = os.path.join(out_dir, f"class{cls}_worst_{rank+1}_idx{i}.png")
             plot_spectrum_pair(
                 s_true[i],
@@ -253,6 +260,7 @@ def main(
     out_dir = os.path.join(save_dir, "recon_debug_plots")
     plot_best_worst_per_class(
         mse=mse,
+        sam=sam,
         y=y,
         s_true=s_true,
         s_recon=s_recon,
