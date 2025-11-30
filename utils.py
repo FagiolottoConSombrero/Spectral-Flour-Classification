@@ -294,6 +294,7 @@ def collect_recon_stats(model: SignalReconAndClassification,
     model.to(device)
 
     all_mse = []
+    all_sam = []
     all_y = []
     all_s_true = []
     all_s_recon = []
@@ -307,18 +308,22 @@ def collect_recon_stats(model: SignalReconAndClassification,
 
             # MSE spettrale per campione
             mse = ((s_recon - x) ** 2).mean(dim=1)  # (B,)
+            sam = spectral_angle_mapper(x, s_recon)  # (B,)
 
             all_mse.append(mse.cpu())
+            all_sam.append(sam.cpu())
             all_y.append(y.cpu())
             all_s_true.append(x.cpu())
             all_s_recon.append(s_recon.cpu())
 
-    all_mse = torch.cat(all_mse).numpy()                # (N,)
-    all_y = torch.cat(all_y).numpy().astype(int)        # (N,)
-    all_s_true = torch.cat(all_s_true).numpy()          # (N,121)
-    all_s_recon = torch.cat(all_s_recon).numpy()        # (N,121)
+    all_mse = torch.cat(all_mse).numpy()
+    all_sam = torch.cat(all_sam).numpy()
+    all_y = torch.cat(all_y).numpy().astype(int)
+    all_s_true = torch.cat(all_s_true).numpy()
+    all_s_recon = torch.cat(all_s_recon).numpy()
 
-    return all_mse, all_y, all_s_true, all_s_recon
+    # --- 7) return aggiornato ---
+    return all_mse, all_sam, all_y, all_s_true, all_s_recon
 
 
 def plot_best_worst_per_class(
@@ -372,3 +377,17 @@ def plot_best_worst_per_class(
 
     print(f"Plot salvati in: {out_dir}")
 
+
+def spectral_angle_mapper(s_true: torch.Tensor, s_recon: torch.Tensor) -> torch.Tensor:
+    """
+    Calcola il SAM in radianti tra due spettri.
+    s_true, s_recon: (B,121)
+    Ritorna: (B,)
+    """
+    dot = (s_true * s_recon).sum(dim=1)
+    norm_true = torch.norm(s_true, dim=1)
+    norm_recon = torch.norm(s_recon, dim=1)
+    cosang = dot / (norm_true * norm_recon + 1e-8)
+    cosang = cosang.clamp(-1 + 1e-7, 1 - 1e-7)
+    angle = torch.acos(cosang)
+    return angle
