@@ -132,7 +132,7 @@ class LitReconSpectral(pl.LightningModule):
         self.save_hyperparameters()
         # NON fissare "cuda" qui: lascia che Lightning gestisca
         self.meas = DualFilterVector(spectral_sens_csv, device="cpu", dtype=torch.float32)
-        self.dec = TinySpecFormer()
+        self.dec = ResMLP8to121()
 
     def on_fit_start(self):
         # assicura coerenza di device/dtype con il trainer
